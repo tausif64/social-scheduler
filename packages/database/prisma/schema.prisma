@@ -1,0 +1,346 @@
+// packages/database/prisma/schema.prisma
+// See docs/DATABASE_SCHEMA.md for the ER diagram, design notes, and the timezone-handling writeup.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ─────────────────────────────────────────────────
+
+enum GlobalRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum SocialPlatform {
+  X
+  LINKEDIN
+  FACEBOOK
+  INSTAGRAM
+  BLUESKY
+  MASTODON
+  TELEGRAM
+}
+
+enum SocialAccountStatus {
+  CONNECTED
+  TOKEN_EXPIRED
+  REVOKED
+  ERROR
+}
+
+enum PostStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+}
+
+enum PublishStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  RETRYING
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  CHANGES_REQUESTED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum NotificationType {
+  POST_PUBLISHED
+  POST_FAILED
+  APPROVAL_REQUESTED
+  APPROVAL_DECISION
+  COMMENT_MENTION
+  BILLING_ISSUE
+}
+
+// ── Core tenancy ──────────────────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String?
+  name         String
+  avatarUrl    String?
+  // Personal UI preference only (IANA name, e.g. "Europe/London") — used for
+  // this user's own dashboard/notification display. NEVER used for post
+  // scheduling — that's always Workspace.timezone. An agency user working
+  // across a London and a New York workspace has one of these, and two of those.
+  timezone     String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+  deletedAt    DateTime? @db.Timestamptz(3) // soft delete — see DATABASE_SCHEMA.md
+
+  memberships   Membership[]
+  createdPosts  Post[]         @relation("PostCreatedBy")
+  approvalSteps ApprovalStep[]
+  comments      Comment[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+}
+
+model Organization {
+  id        String    @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(3)
+  deletedAt DateTime? @db.Timestamptz(3)
+
+  memberships  Membership[]
+  workspaces   Workspace[]
+  subscription Subscription?
+  auditLogs    AuditLog[]
+
+  @@index([ownerId])
+}
+
+model Workspace {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  // THE authoritative timezone for this client/brand — IANA name, e.g.
+  // "America/New_York" or "Europe/London". Every scheduling calculation
+  // (composer picker, calendar display, "due now" check) resolves through
+  // this field, never the server's or the browser's local timezone.
+  timezone       String   @default("UTC")
+  brandProfile   Json?    // tone/voice/colors — feeds AI caption generation
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  memberships    Membership[]
+  socialAccounts SocialAccount[]
+  posts          Post[]
+  media          Media[]
+
+  @@index([organizationId])
+}
+
+model Membership {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaceId    String?       // null = org-level membership only (billing/org settings)
+  workspace      Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role           GlobalRole    @default(MEMBER)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@unique([userId, organizationId, workspaceId])
+  @@index([organizationId])
+  @@index([workspaceId])
+}
+
+// ── Social connections ────────────────────────────────────
+
+model SocialAccount {
+  id                String              @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform          SocialPlatform
+  externalAccountId String              // the platform's own ID for this account/page
+  displayName       String
+  accessTokenEnc    String              // envelope-encrypted — never store plaintext
+  refreshTokenEnc   String?
+  tokenExpiresAt    DateTime?           @db.Timestamptz(3)
+  status            SocialAccountStatus @default(CONNECTED)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(3)
+
+  postTargets PostTarget[]
+
+  @@unique([workspaceId, platform, externalAccountId])
+  @@index([workspaceId])
+}
+
+// ── Content ───────────────────────────────────────────────
+
+model Post {
+  id          String     @id @default(cuid())
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User       @relation("PostCreatedBy", fields: [createdById], references: [id])
+  baseContent String     // fallback content, overridden per-target below
+  status      PostStatus @default(DRAFT)
+  // Always the absolute UTC instant to publish — computed once, at write time,
+  // from the composer's "local wall-clock time + workspace.timezone". Nothing
+  // downstream (queue delay math, the worker, the calendar's "is this due"
+  // check) ever needs to know or care what timezone the user was looking at.
+  scheduledAt DateTime?  @db.Timestamptz(3)
+  createdAt   DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime   @updatedAt @db.Timestamptz(3)
+
+  targets       PostTarget[]
+  media         PostMedia[]
+  approvalSteps ApprovalStep[]
+  comments      Comment[]
+
+  @@index([workspaceId, status])
+  @@index([scheduledAt])
+}
+
+model PostTarget {
+  id              String         @id @default(cuid())
+  postId          String
+  post            Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccountId String
+  socialAccount   SocialAccount  @relation(fields: [socialAccountId], references: [id])
+  platform        SocialPlatform
+  contentOverride String?        // platform-specific text; null = use Post.baseContent
+  publishStatus   PublishStatus  @default(PENDING)
+  platformPostId  String?        // ID returned by the platform once published
+  error           String?
+  attemptCount    Int            @default(0)
+  publishedAt     DateTime?      @db.Timestamptz(3)
+
+  @@index([postId])
+  @@index([publishStatus])
+}
+
+model Media {
+  id          String      @id @default(cuid())
+  workspaceId String
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  r2Key       String
+  type        String      // "image" | "video" | "gif"
+  sizeBytes   Int
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+
+  posts PostMedia[]
+
+  @@index([workspaceId])
+}
+
+model PostMedia {
+  postId  String
+  post    Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mediaId String
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  order   Int    @default(0)
+
+  @@id([postId, mediaId])
+}
+
+// ── Collaboration ─────────────────────────────────────────
+
+model ApprovalStep {
+  id         String         @id @default(cuid())
+  postId     String
+  post       Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  approverId String
+  approver   User           @relation(fields: [approverId], references: [id])
+  status     ApprovalStatus @default(PENDING)
+  comment    String?
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  decidedAt  DateTime?      @db.Timestamptz(3)
+
+  @@index([postId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  body      String
+  mentions  String[] // userIds mentioned, parsed at write time
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([postId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  payload   Json
+  readAt    DateTime?        @db.Timestamptz(3)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, readAt])
+}
+
+// ── Billing ────────────────────────────────────────────────
+
+model Plan {
+  id           String @id @default(cuid())
+  name         String @unique
+  priceMonthly Int    // smallest currency unit (paise/cents)
+  priceYearly  Int?
+  limits       Json   // { workspaces, socialAccounts, postsPerMonth, seats }
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String             @unique
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planId             String
+  plan               Plan               @relation(fields: [planId], references: [id])
+  status             SubscriptionStatus @default(TRIALING)
+  trialEndsAt        DateTime?          @db.Timestamptz(3)
+  currentPeriodEnd   DateTime?          @db.Timestamptz(3)
+  provider           String             // "razorpay" | "paddle"
+  providerCustomerId String?
+  createdAt          DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(3)
+
+  invoices Invoice[]
+}
+
+model Invoice {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  amount         Int
+  status         String       // "paid" | "failed" | "pending"
+  provider       String
+  providerRef    String?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([subscriptionId])
+}
+
+// ── Audit ──────────────────────────────────────────────────
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorId        String
+  actor          User         @relation(fields: [actorId], references: [id])
+  action         String
+  meta           Json?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([organizationId, createdAt])
+}

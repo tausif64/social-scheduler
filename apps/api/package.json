@@ -1,0 +1,15 @@
+{
+  "name": "api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "echo \"TODO: add dev script for api\"",
+    "build": "echo \"TODO: add build script for api\""
+  },
+  "dependencies": {
+    "@repo/database": "workspace:^",
+    "better-auth": "^1.6.29",
+    "bullmq": "^6.1.1",
+    "ioredis": "^6.0.0"
+  }
+}

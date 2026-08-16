@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    { "type": "user" },
+    {
+      "type": "organization",
+      "relations": {
+        "owner": { "this": {} },
+        "admin": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "relation": "owner" } }
+            ]
+          }
+        },
+        "member": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "relation": "admin" } }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "owner": { "directly_related_user_types": [{ "type": "user" }] },
+          "admin": { "directly_related_user_types": [{ "type": "user" }] },
+          "member": { "directly_related_user_types": [{ "type": "user" }] }
+        }
+      }
+    },
+    {
+      "type": "workspace",
+      "relations": {
+        "organization": { "this": {} },
+        "admin": {
+          "union": {
+            "child": [
+              { "this": {} },
+              {
+                "tupleToUserset": {
+                  "tupleset": { "relation": "organization" },
+                  "computedUserset": { "relation": "admin" }
+                }
+              }
+            ]
+          }
+        },
+        "member": {
+          "union": {
+            "child": [
+              { "this": {} },
+              {
+                "tupleToUserset": {
+                  "tupleset": { "relation": "organization" },
+                  "computedUserset": { "relation": "member" }
+                }
+              },
+              { "computedUserset": { "relation": "admin" } }
+            ]
+          }
+        },
+        "can_edit_post": {
+          "union": {
+            "child": [
+              { "computedUserset": { "relation": "admin" } },
+              { "computedUserset": { "relation": "member" } }
+            ]
+          }
+        },
+        "can_publish_post": { "computedUserset": { "relation": "admin" } },
+        "can_manage_billing": {
+          "tupleToUserset": {
+            "tupleset": { "relation": "organization" },
+            "computedUserset": { "relation": "owner" }
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "organization": { "directly_related_user_types": [{ "type": "organization" }] },
+          "admin": { "directly_related_user_types": [{ "type": "user" }] },
+          "member": { "directly_related_user_types": [{ "type": "user" }] },
+          "can_edit_post": { "directly_related_user_types": [] },
+          "can_publish_post": { "directly_related_user_types": [] },
+          "can_manage_billing": { "directly_related_user_types": [] }
+        }
+      }
+    }
+  ]
+}

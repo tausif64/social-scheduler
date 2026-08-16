@@ -1,0 +1,14 @@
+{
+  "name": "worker",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "echo \"TODO: add dev script for worker\"",
+    "build": "echo \"TODO: add build script for worker\""
+  },
+  "dependencies": {
+    "@repo/database": "workspace:^",
+    "bullmq": "^6.1.1",
+    "ioredis": "^6.0.0"
+  }
+}

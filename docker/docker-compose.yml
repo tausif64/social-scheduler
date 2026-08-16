@@ -1,0 +1,65 @@
+# Save as: docker/docker-compose.yml
+# Run from repo root: docker compose -f docker/docker-compose.yml --env-file .env up -d --build
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: social_scheduler
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      TZ: UTC
+    restart: unless-stopped
+
+  # api:
+  #   build:
+  #     context: ..
+  #     dockerfile: apps/api/Dockerfile
+  #   environment:
+  #     TZ: UTC
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     REDIS_URL: redis://redis:6379
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   restart: unless-stopped
+  #   # No `ports:` mapping to the host on purpose — nginx is the only
+  #   # thing that talks to api from outside the Compose network.
+
+  # worker:
+  #   build:
+  #     context: ..
+  #     dockerfile: apps/worker/Dockerfile
+  #   environment:
+  #     TZ: UTC
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     REDIS_URL: redis://redis:6379
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   restart: unless-stopped
+  #   # No `ports:` at all — worker has nothing to expose, matches nginx.conf
+  #   # having no route to it either.
+
+  # web:
+  #   build:
+  #     context: ..
+  #     dockerfile: apps/web/Dockerfile
+  #   environment:
+  #     TZ: UTC
+  #     NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+  #   depends_on:
+  #     - api
+  #   restart: unless-stopped
+
+
+volumes:
+  postgres_data:
