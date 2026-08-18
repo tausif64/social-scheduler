@@ -3,8 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "echo \"TODO: add dev script for worker\"",
-    "build": "echo \"TODO: add build script for worker\""
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@repo/database": "workspace:^",

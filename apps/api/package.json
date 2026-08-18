@@ -3,13 +3,20 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "echo \"TODO: add dev script for api\"",
-    "build": "echo \"TODO: add build script for api\""
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
   },
   "dependencies": {
+    "@openfga/sdk": "^0.9.6",
     "@repo/database": "workspace:^",
     "better-auth": "^1.6.29",
     "bullmq": "^6.1.1",
+    "express": "^5.2.1",
     "ioredis": "^6.0.0"
+  },
+   "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.2.0"
   }
 }

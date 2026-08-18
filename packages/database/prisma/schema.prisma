@@ -7,7 +7,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ── Enums ─────────────────────────────────────────────────
@@ -78,20 +77,18 @@ enum NotificationType {
 // ── Core tenancy ──────────────────────────────────────────
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String?
-  name         String
-  avatarUrl    String?
-  // Personal UI preference only (IANA name, e.g. "Europe/London") — used for
-  // this user's own dashboard/notification display. NEVER used for post
-  // scheduling — that's always Workspace.timezone. An agency user working
-  // across a London and a New York workspace has one of these, and two of those.
-  timezone     String?
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+
   createdAt    DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
   deletedAt    DateTime? @db.Timestamptz(3) // soft delete — see DATABASE_SCHEMA.md
 
+  sessions      Session[]
+  accounts      Account[]
   memberships   Membership[]
   createdPosts  Post[]         @relation("PostCreatedBy")
   approvalSteps ApprovalStep[]
@@ -99,8 +96,59 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
 
+  @@unique([email])
   @@index([email])
+  @@map("user")
 }
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
 
 model Organization {
   id        String    @id @default(cuid())

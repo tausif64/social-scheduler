@@ -8,7 +8,7 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "db:migrate": "pnpm --filter @repo/database exec prisma migrate dev"
+    "db:push": "pnpm --filter @repo/database exec prisma db push"
   },
   "devDependencies": {
     "turbo": "^2.0.0"
